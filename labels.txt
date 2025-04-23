@@ -1,0 +1,4 @@
+0 Healthy
+1 EarlyBlight
+2 LateBlight
+3 TryAgain

@@ -1,0 +1,12 @@
+streamlit-webrtc
+opencv-python-headless
+SciPy
+NumPy
+tensorflow
+streamlit
+streamlit-extras
+pillow
+datetime
+keras
+h5py
+streamlit-lottie
