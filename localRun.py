@@ -6,7 +6,7 @@ import numpy as np
 np.set_printoptions(suppress=True)
 
 # Load the model
-model = load_model("keras_Model.h5", compile=False)
+model = load_model("keras_model.h5", compile=False)
 
 # Load the labels
 class_names = open("labels.txt", "r").readlines()
@@ -37,6 +37,8 @@ while True:
     confidence_score = prediction[0][index]
 
     # Print prediction and confidence score
+    # class_name from labels.txt includes a numeric prefix and a space (e.g., "0 Healthy").
+    # Slice [2:] to remove this prefix for cleaner display.
     print("Class:", class_name[2:], end="")
     print("Confidence Score:", str(np.round(confidence_score * 100))[:-2], "%")
 
