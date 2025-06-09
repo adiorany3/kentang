@@ -255,6 +255,12 @@ def load_models():
     model_path = "keras_model.h5"  # Define model path
 
     # Hack to change model config
+    # This section attempts to modify the model's configuration string stored within the H5 file.
+    # Specifically, it removes the '"groups": 1,' attribute from the model_config.
+    # This can be a workaround for compatibility issues when loading older Keras models
+    # (especially those with layers like DepthwiseConv2D) in newer versions of TensorFlow/Keras,
+    # where the 'groups' parameter might not be expected or handled correctly by default.
+    # If this hack is removed and model loading fails, it indicates such a compatibility issue.
     try:
         f = h5py.File(model_path, mode="r+")
         model_config_string = f.attrs.get("model_config")
@@ -262,15 +268,18 @@ def load_models():
             model_config_string = model_config_string.decode('utf-8')
         if (model_config_string and '"groups": 1,' in model_config_string):
             model_config_string = model_config_string.replace('"groups": 1,', '')
-            f.attrs['model_config'] = model_config_string  # Corrected assignment
+            f.attrs['model_config'] = model_config_string
             f.flush()
-            model_config_string = f.attrs.get("model_config")
-            if model_config_string is not None and isinstance(model_config_string, bytes):
-                model_config_string = model_config_string.decode('utf-8')
-            assert '"groups": 1,' not in model_config_string
+            # Verify the change
+            model_config_string_after_hack = f.attrs.get("model_config")
+            if model_config_string_after_hack is not None and isinstance(model_config_string_after_hack, bytes):
+                model_config_string_after_hack = model_config_string_after_hack.decode('utf-8')
+            # Ensure the problematic string is no longer present
+            assert '"groups": 1,' not in model_config_string_after_hack, "Model config hack failed to remove 'groups': 1"
         f.close()
     except Exception as e:
-        st.warning(f"Error applying model config hack: {e}")
+        # It's important to inform the user if the hack fails, as model loading might subsequently fail or behave unexpectedly.
+        st.warning(f"Warning: Error occurred while trying to apply model configuration compatibility hack: {e}. If model loading fails, this might be related.")
 
     try:
         model_eval = load_model(model_path, compile=False)
@@ -405,6 +414,7 @@ def main():
                     # Make sure index is valid for class_names list
                     if index < len(class_names):
                         class_name = class_names[index]
+                        parsed_label = class_name.split(' ', 1)[1].lower()
                     else:
                         st.error(f"Predicted index {index} is out of range for available classes in labels.txt")
                         return
@@ -416,23 +426,31 @@ def main():
                     return
                 
                 # Display results based on prediction and actual class names from labels.txt
-                if confidence_score > 0.7:  # Slightly lower threshold for better usability
+                if parsed_label == "tryagain":
+                    st.markdown(f'''
+                    <div class="disease-card ncd-card" style="background-color: #fff1f2; border-left-color: #ef4444;">
+                        <div class="disease-title" style="color: #c2410c;">Error: Gambar Tidak Sesuai</div>
+                        <p style="color: #52525b;">Model mengindikasikan bahwa gambar tidak dapat diproses dengan baik atau bukan merupakan gambar daun kentang yang valid. Silahkan coba lagi dengan citra daun yang sesuai, pastikan pencahayaan cukup dan fokus jelas, sesuai dengan panduan penggunaan.</p>
+                        <p style="color: #52525b;"><i>Label terdeteksi: {class_name} (Keyakinan: {confidence_score*100:.2f}%)</i></p>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                elif confidence_score > 0.7:  # Slightly lower threshold for better usability
                     # Parse the class name from labels.txt (format might be "0 Healthy")
-                    if "early blight" in class_name.lower() or "early_blight" in class_name.lower() or "earlyblight" in class_name.lower():
+                    if parsed_label == "earlyblight":
                         st.markdown(f"""
                         <div class="disease-card ncd-card" style="background-color: white;">
                             <div class="disease-title" style="color: #000000;">🦠 Early Blight (Busuk Daun Awal)</div>
                             <p style="color: #000000;">Disebabkan oleh jamur Alternaria solani. Gejala: Bercak coklat berbentuk cincin konsentris, dimulai dari daun yang lebih tua. Pencegahan: Rotasi tanaman, fungisida, dan jaga agar daun tetap kering.</p>
                         </div>
                         """, unsafe_allow_html=True)
-                    elif "late blight" in class_name.lower() or "late_blight" in class_name.lower() or "lateblight" in class_name.lower():
+                    elif parsed_label == "lateblight":
                         st.markdown(f"""
                         <div class="disease-card coccidiosis-card" style="background-color: white;">
                             <div class="disease-title" style="color: #000000;">🔬 Late Blight (Busuk Daun Akhir)</div>
                             <p style="color: #000000;">Disebabkan oleh Phytophthora infestans. Gejala: Bercak berwarna hijau gelap hingga hitam yang cepat menyebar, tepi daun berair, dan jamur putih di bawah daun. Sangat menular dan destruktif. Pencegahan: Fungisida, varietas tahan, dan kondisi tanam yang baik.</p>
                         </div>
                         """, unsafe_allow_html=True)
-                    elif "healthy" in class_name.lower():
+                    elif parsed_label == "healthy":
                         st.markdown(f"""
                         <div class="disease-card healthy-card" style="background-color: white;">
                             <div class="disease-title" style="color: #000000;">✅ Healthy - Daun Kentang Sehat</div>
@@ -443,7 +461,7 @@ def main():
                         # For any other class that might be in labels.txt
                         st.markdown(f"""
                         <div class="disease-card" style="background-color: white;">
-                            <div class="disease-title" style="color: #000000;">🔎 {class_name}</div>
+                            <div class="disease-title" style="color: #000000;">🔎 Kondisi tidak dikenal terdeteksi. Harap konsultasikan dengan ahli pertanian.</div>
                             <p style="color: #000000;">Terdeteksi kondisi seperti yang ditunjukkan, pastikan Anda mengambil foto object yang sesuai dengan keterangan dan cara penggunaan. Silahkan ulangi lagi atau harap konsultasikan dengan ahli pertanian untuk konfirmasi lebih lanjut.</p>
                         </div>
                         """, unsafe_allow_html=True)
@@ -453,8 +471,8 @@ def main():
                     
                     # Display gauge chart
                     st.plotly_chart(create_gauge_chart(confidence_percent), use_container_width=True)
-                else:
-                    st.warning("Sesuaikan posisi gambar daun kentang, untuk mendapatkan hasil pembacaan terbaik")
+                else: # confidence_score <= 0.7 and not "tryagain"
+                    st.warning(f"Keyakinan prediksi rendah. Sesuaikan posisi gambar daun kentang, pastikan pencahayaan cukup dan fokus jelas untuk mendapatkan hasil pembacaan terbaik. Prediksi saat ini: {class_name} (Keyakinan: {confidence_percent:.2f}%)")
 
     # Footer with LinkedIn profile link and improved styling
     st.markdown("""
