@@ -1,44 +1,36 @@
 # Developed by Galuh Adi Insani
 # Dimohon jangan hilangkan pada bagian ini untuk menghargai hasil kerja keras developer.
-# Fixed package: TensorFlow/Keras compatibility for legacy keras_model.h5.
+# Fixed package for Streamlit Cloud: modern TensorFlow install + legacy H5 manual weight loading.
 
 from __future__ import annotations
 
 import datetime
 import os
 import re
-import shutil
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import List, Tuple, Union
 
-# Keep TensorFlow logs quieter. Do not import standalone `keras`.
+# Keep TensorFlow output quieter on Streamlit Cloud.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
-import h5py
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-import tensorflow as tf
 from PIL import Image
+
+from model_loader import build_compatible_model, preprocess_pil_image
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "keras_model.h5"
-PATCHED_MODEL_PATH = BASE_DIR / "keras_model.compat.h5"
 LABELS_PATH = BASE_DIR / "labels.txt"
-MODEL_URL = "https://raw.githubusercontent.com/adiorany3/kentang/main/keras_model.h5"
 CURRENT_YEAR = datetime.datetime.now().year
-TARGET_SIZE = (224, 224)
-
 
 st.set_page_config(
-    page_title="Deteksi Penyakit Kentang",
+    page_title="Deteksi Penyakit Daun Kentang",
     page_icon="🥔",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 
 st.markdown(
     """
@@ -47,47 +39,47 @@ st.markdown(
             color: #1E3A8A;
             font-weight: 700;
             text-align: center;
-            padding: 0.5rem;
+            padding: 0.6rem;
             margin-bottom: 1rem;
-            background: linear-gradient(90deg, rgba(219,234,254,0.3) 0%, rgba(191,219,254,0.3) 100%);
-            border-radius: 10px;
+            background: linear-gradient(90deg, rgba(219,234,254,0.4) 0%, rgba(191,219,254,0.4) 100%);
+            border-radius: 12px;
         }
         .disease-card {
             padding: 1.25rem;
-            border-radius: 10px;
+            border-radius: 12px;
             margin-bottom: 1rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.06);
             background: white;
-            border-left: 4px solid #1E3A8A;
+            border-left: 5px solid #1E3A8A;
         }
         .disease-title {
             font-size: 1.5rem;
-            font-weight: 600;
+            font-weight: 700;
             margin-bottom: 0.5rem;
             color: #111827;
         }
         .confidence-display {
             text-align: center;
             font-size: 1.25rem;
-            font-weight: 600;
+            font-weight: 700;
             color: #1E3A8A;
             margin: 0.5rem 0;
         }
         .confidence-bar {
-            height: 6px;
+            height: 8px;
             background-color: #e5e7eb;
-            border-radius: 3px;
+            border-radius: 999px;
             margin: 0.5rem 0;
         }
         .confidence-bar-fill {
             height: 100%;
-            border-radius: 3px;
+            border-radius: 999px;
         }
         .camera-container {
             background-color: white;
             padding: 1rem;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.06);
         }
         .footer {
             text-align: center;
@@ -103,6 +95,42 @@ st.markdown(
 )
 
 
+DISEASE_INFO = {
+    "earlyblight": {
+        "title": "Early Blight",
+        "icon": "🍂",
+        "description": "Penyakit busuk daun awal yang umumnya ditandai bercak cokelat melingkar pada daun.",
+        "recommendation": (
+            "Pisahkan bagian tanaman yang terinfeksi, perbaiki sirkulasi udara, hindari penyiraman dari atas, "
+            "dan konsultasikan penggunaan fungisida sesuai anjuran ahli pertanian setempat."
+        ),
+    },
+    "healthy": {
+        "title": "Healthy",
+        "icon": "✅",
+        "description": "Daun tampak sehat berdasarkan pola visual yang dikenali model.",
+        "recommendation": (
+            "Pertahankan pemupukan seimbang, penyiraman cukup, monitoring rutin, dan sanitasi lahan."
+        ),
+    },
+    "lateblight": {
+        "title": "Late Blight",
+        "icon": "⚠️",
+        "description": "Penyakit busuk daun akhir yang dapat menyebar cepat pada kondisi lembap.",
+        "recommendation": (
+            "Segera isolasi tanaman terindikasi, kurangi kelembapan berlebih, buang jaringan terinfeksi dengan aman, "
+            "dan minta konfirmasi ahli pertanian."
+        ),
+    },
+    "tryagain": {
+        "title": "Try Again",
+        "icon": "🔁",
+        "description": "Gambar kurang sesuai, kurang jelas, atau tidak cukup menyerupai daun kentang untuk diprediksi.",
+        "recommendation": "Ambil ulang foto dengan pencahayaan cukup, daun berada di tengah gambar, dan latar belakang tidak terlalu ramai.",
+    },
+}
+
+
 with st.sidebar:
     st.markdown(
         "<h2 style='text-align: center; color: #1E3A8A;'>🥔 Deteksi Penyakit Daun Kentang</h2>",
@@ -112,33 +140,33 @@ with st.sidebar:
     with st.expander("ℹ️ Tentang Aplikasi", expanded=True):
         st.markdown(
             """
-            ### Tentang Software
-            Aplikasi ini memprediksi penyakit pada daun kentang menggunakan computer vision dan machine learning.
+            Aplikasi ini memprediksi kondisi daun kentang menggunakan computer vision dan model machine learning.
 
-            **Penyakit yang dapat dideteksi:**
-            - ✅ **Healthy** - Daun kentang sehat
-            - 🍂 **Early Blight** - Penyakit busuk daun awal
-            - ⚠️ **Late Blight** - Penyakit busuk daun akhir
-            - ❌ **TryAgain** - Gambar tidak sesuai / perlu dicoba ulang
+            **Kelas yang didukung:**
+            - Early Blight
+            - Healthy
+            - Late Blight
+            - TryAgain
             """
         )
 
     with st.expander("📌 Cara Penggunaan", expanded=False):
         st.markdown(
             """
-            1. Foto daun kentang memakai kamera atau unggah gambar.
+            1. Ambil foto daun kentang atau upload gambar.
             2. Pastikan pencahayaan cukup dan objek daun terlihat jelas.
-            3. Sistem akan menampilkan prediksi dan confidence score.
+            3. Tunggu hasil prediksi dan confidence score.
 
-            > Prediksi aplikasi hanya diagnosis awal. Konfirmasi akhir tetap perlu dilakukan oleh ahli pertanian.
+            Prediksi ini adalah diagnosis awal, bukan pengganti pemeriksaan ahli.
             """
         )
 
-    with st.expander("📚 Sumber Data", expanded=False):
+    with st.expander("🛠️ Info Perbaikan", expanded=False):
         st.markdown(
             """
-            Data dikembangkan dengan memanfaatkan database Kaggle yang diproses menggunakan machine learning.
-            [Potato Leaf Disease Dataset (Kaggle)](https://www.kaggle.com/datasets/muhammadardiputra/potato-leaf-disease-dataset)
+            Paket ini memakai loader kompatibilitas khusus untuk model `.h5` lama.
+            Arsitektur model dibangun ulang, lalu bobot dibaca langsung dari file HDF5.
+            Cara ini menghindari error deserialisasi Keras seperti `expects 1 input(s), but it received 2 input tensors`.
             """
         )
 
@@ -153,94 +181,8 @@ with st.sidebar:
     )
 
 
-def _download_model_if_missing() -> None:
-    """Download the original model if it is not packaged locally.
-
-    The binary model is intentionally not generated or replaced. This only fetches
-    the original repository asset when it is absent.
-    """
-    if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 0:
-        return
-
-    try:
-        with urllib.request.urlopen(MODEL_URL, timeout=60) as response:
-            model_bytes = response.read()
-
-        if len(model_bytes) < 1024 * 1024:
-            raise RuntimeError(
-                "File model yang terunduh terlalu kecil. Kemungkinan unduhan gagal atau URL berubah."
-            )
-
-        MODEL_PATH.write_bytes(model_bytes)
-    except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
-        raise FileNotFoundError(
-            "File `keras_model.h5` belum tersedia dan auto-download gagal. "
-            "Unduh manual dari repository GitHub asli, lalu letakkan di folder yang sama dengan `main.py`. "
-            f"Detail: {error}"
-        ) from error
-
-
-def _load_keras_model(path: Path):
-    """Load a Keras H5 model while tolerating old/new Keras signatures."""
-    try:
-        return tf.keras.models.load_model(path, compile=False, safe_mode=False)
-    except TypeError:
-        return tf.keras.models.load_model(path, compile=False)
-
-
-def _remove_groups_from_h5_copy(source_path: Path, target_path: Path) -> Path:
-    """Create a compatible H5 copy without a legacy `groups` config entry.
-
-    Some exported Keras/Teachable Machine H5 files contain fields that can break
-    loading on newer TensorFlow/Keras combinations. The original model is never
-    modified; a `.compat.h5` copy is regenerated when needed.
-    """
-    if target_path.exists() and target_path.stat().st_mtime >= source_path.stat().st_mtime:
-        return target_path
-
-    shutil.copy2(source_path, target_path)
-
-    with h5py.File(target_path, mode="r+") as h5_file:
-        model_config = h5_file.attrs.get("model_config")
-
-        if isinstance(model_config, bytes):
-            model_config = model_config.decode("utf-8")
-
-        if isinstance(model_config, str):
-            cleaned_config = model_config.replace('"groups": 1,', "")
-            cleaned_config = cleaned_config.replace(', "groups": 1', "")
-
-            if cleaned_config != model_config:
-                h5_file.attrs["model_config"] = cleaned_config
-                h5_file.flush()
-
-    return target_path
-
-
-@st.cache_resource(show_spinner=False)
-def load_model_resource():
-    _download_model_if_missing()
-
-    load_errors: List[str] = []
-
-    try:
-        return _load_keras_model(MODEL_PATH)
-    except Exception as error:  # noqa: BLE001 - user-facing diagnostics are needed here.
-        load_errors.append(f"original: {error}")
-
-    try:
-        compatible_model_path = _remove_groups_from_h5_copy(MODEL_PATH, PATCHED_MODEL_PATH)
-        return _load_keras_model(compatible_model_path)
-    except Exception as error:  # noqa: BLE001
-        load_errors.append(f"compat-copy: {error}")
-
-    details = "\n\n".join(load_errors)
-    raise RuntimeError(
-        "Model gagal dimuat. Penyebab paling umum: file `.h5` lama dibuka dengan "
-        "kombinasi Keras/TensorFlow terbaru yang tidak kompatibel. Gunakan Python 3.10/3.11 "
-        "dan install dependency dari `requirements.txt` paket ini.\n\n"
-        f"Detail error:\n{details}"
-    )
+def normalize_label(label: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", label.lower())
 
 
 def load_class_names(labels_path: Path = LABELS_PATH) -> List[str]:
@@ -264,12 +206,13 @@ def load_class_names(labels_path: Path = LABELS_PATH) -> List[str]:
     return lines
 
 
-def normalize_label(label: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", label.lower())
+@st.cache_resource(show_spinner=False)
+def load_model_resource():
+    return build_compatible_model(MODEL_PATH)
 
 
 def validate_image(image_file) -> Tuple[bool, Union[Image.Image, str]]:
-    max_size = 5 * 1024 * 1024
+    max_size = 10 * 1024 * 1024
 
     try:
         file_size = getattr(image_file, "size", None)
@@ -277,42 +220,31 @@ def validate_image(image_file) -> Tuple[bool, Union[Image.Image, str]]:
             file_size = len(image_file.getbuffer())
 
         if file_size is not None and file_size > max_size:
-            return False, "Ukuran file terlalu besar. Maksimal 5MB."
+            return False, "Ukuran file terlalu besar. Maksimal 10 MB."
 
         image = Image.open(image_file).convert("RGB")
         return True, image
-    except Exception as error:  # noqa: BLE001
-        return False, f"Error memproses gambar: {error}"
-
-
-def preprocess_image(image: Image.Image) -> np.ndarray:
-    image = image.convert("RGB")
-    image = image.resize(TARGET_SIZE, Image.Resampling.LANCZOS)
-    image_array = np.asarray(image, dtype=np.float32)
-    image_array = (image_array / 127.5) - 1.0
-    return np.expand_dims(image_array, axis=0)
+    except Exception as error:
+        return False, f"Gagal memproses gambar: {error}"
 
 
 def predict_image(model, image: Image.Image) -> Tuple[int, float, np.ndarray]:
-    processed_image = preprocess_image(image)
+    processed_image = preprocess_pil_image(image)
     prediction = model.predict(processed_image, verbose=0)
-
-    if isinstance(prediction, (list, tuple)):
-        prediction = prediction[0]
-
     prediction = np.asarray(prediction)
+
     index = int(np.argmax(prediction[0]))
-    confidence_score = float(prediction[0][index])
+    confidence_score = float(prediction[0][index]) * 100.0
     return index, confidence_score, prediction
 
 
 def display_confidence(score: float) -> None:
-    color = "#22c55e" if score > 90 else "#eab308" if score > 70 else "#ef4444"
+    color = "#22c55e" if score >= 80 else "#eab308" if score >= 50 else "#ef4444"
     st.markdown(
         f"""
         <div class="confidence-display">Confidence Score: {score:.2f}%</div>
         <div class="confidence-bar">
-            <div class="confidence-bar-fill" style="width: {score}%; background-color: {color};"></div>
+            <div class="confidence-bar-fill" style="width: {min(max(score, 0), 100)}%; background-color: {color};"></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -325,170 +257,100 @@ def create_gauge_chart(score: float):
             mode="gauge+number",
             value=score,
             domain={"x": [0, 1], "y": [0, 1]},
-            title={"text": "Confidence Score", "font": {"size": 16, "color": "#1E3A8A"}},
-            number={"font": {"size": 20, "color": "#1E3A8A"}, "suffix": "%", "valueformat": ".2f"},
+            title={"text": "Confidence Score"},
+            number={"suffix": "%", "valueformat": ".2f"},
             gauge={
-                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#1E3A8A"},
-                "bar": {"color": "#1E3A8A" if score > 90 else "#eab308" if score > 70 else "#ef4444"},
-                "bgcolor": "white",
-                "borderwidth": 2,
-                "bordercolor": "#e5e7eb",
+                "axis": {"range": [0, 100]},
+                "bar": {"color": "#1E3A8A"},
                 "steps": [
                     {"range": [0, 50], "color": "#fee2e2"},
                     {"range": [50, 80], "color": "#fef9c3"},
                     {"range": [80, 100], "color": "#dcfce7"},
                 ],
-                "threshold": {"line": {"color": "#16a34a", "width": 4}, "thickness": 0.75, "value": 90},
             },
         )
     )
-    fig.update_layout(
-        height=150,
-        margin=dict(l=10, r=10, t=30, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
+    fig.update_layout(height=260, margin={"l": 20, "r": 20, "t": 40, "b": 20})
     return fig
 
 
 def render_prediction(label: str, confidence_score: float) -> None:
-    normalized = normalize_label(label)
-    confidence_percent = confidence_score * 100
-
-    if normalized == "tryagain":
-        st.markdown(
-            f"""
-            <div class="disease-card" style="border-left-color: #ef4444;">
-                <div class="disease-title" style="color: #c2410c;">Error: Gambar Tidak Sesuai</div>
-                <p>Model mengindikasikan gambar tidak dapat diproses dengan baik atau bukan gambar daun kentang yang valid.</p>
-                <p><i>Label terdeteksi: {label} ({confidence_percent:.2f}%)</i></p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        return
-
-    if confidence_score <= 0.7:
-        st.warning(
-            f"Keyakinan prediksi rendah. Prediksi sementara: {label} "
-            f"(Keyakinan: {confidence_percent:.2f}%). Coba ambil gambar dengan pencahayaan dan fokus yang lebih baik."
-        )
-        return
-
-    if normalized == "earlyblight":
-        title = "🍂 Early Blight (Busuk Daun Awal)"
-        description = (
-            "Disebabkan oleh jamur Alternaria solani. Gejala umum berupa bercak coklat "
-            "berbentuk cincin konsentris, biasanya dimulai dari daun yang lebih tua."
-        )
-    elif normalized == "lateblight":
-        title = "⚠️ Late Blight (Busuk Daun Akhir)"
-        description = (
-            "Disebabkan oleh Phytophthora infestans. Gejala umum berupa bercak hijau gelap "
-            "hingga hitam yang cepat menyebar dan dapat disertai tepi daun berair."
-        )
-    elif normalized == "healthy":
-        title = "✅ Healthy - Daun Kentang Sehat"
-        description = "Daun kentang terlihat sehat, berwarna hijau merata, tanpa bercak atau lesi yang jelas."
-    else:
-        title = "Kondisi Tidak Dikenal"
-        description = "Label terdeteksi tidak dikenali oleh aplikasi. Periksa kembali isi labels.txt."
-
+    info = DISEASE_INFO.get(normalize_label(label), DISEASE_INFO["tryagain"])
     st.markdown(
         f"""
         <div class="disease-card">
-            <div class="disease-title">{title}</div>
-            <p>{description}</p>
-            <p><i>Label terdeteksi: {label}</i></p>
+            <div class="disease-title">{info['icon']} {info['title']}</div>
+            <p><strong>Deskripsi:</strong> {info['description']}</p>
+            <p><strong>Rekomendasi:</strong> {info['recommendation']}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    display_confidence(confidence_score)
 
 
-def main() -> None:
-    st.markdown(
-        "<h1 class='main-header'>🥔 Sistem Deteksi Penyakit Daun Kentang</h1>",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    "<h1 class='main-header'>🥔 Deteksi Penyakit Daun Kentang</h1>",
+    unsafe_allow_html=True,
+)
 
-    col1, col2 = st.columns([1, 1])
+left_col, right_col = st.columns([1, 1])
 
-    with col1:
-        st.markdown("<h3>📷 Ambil / Upload Gambar Daun Kentang</h3>", unsafe_allow_html=True)
-        st.markdown("<div class='camera-container'>", unsafe_allow_html=True)
-        camera_image = st.camera_input(
-            label="Capture Image",
-            key="First Camera",
-            label_visibility="collapsed",
+with left_col:
+    st.markdown("<div class='camera-container'>", unsafe_allow_html=True)
+    st.subheader("📷 Ambil atau Upload Gambar")
+
+    camera_image = st.camera_input("Ambil foto daun kentang")
+
+    with st.expander("📤 Upload gambar"):
+        uploaded_file = st.file_uploader(
+            "Pilih file gambar",
+            type=["jpg", "jpeg", "png", "webp"],
         )
-        with st.expander("📤 Upload Gambar"):
-            uploaded_file = st.file_uploader(
-                "Pilih file gambar",
-                type=["jpg", "jpeg", "png"],
-            )
-        image_file = camera_image or uploaded_file
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    with col2:
-        st.markdown("<h3>📊 Hasil Analisis</h3>", unsafe_allow_html=True)
+    image_file = camera_image or uploaded_file
+    image = None
 
-        try:
-            with st.spinner("Memuat model..."):
-                model = load_model_resource()
-            class_names = load_class_names()
-        except Exception as error:  # noqa: BLE001
-            st.error(str(error))
-            st.info(
-                "Pastikan `keras_model.h5` dan `labels.txt` berada di folder yang sama dengan `main.py`. "
-                "Gunakan Python 3.10/3.11 dan install dependency dari `requirements.txt` paket ini."
-            )
-            return
-
-        if image_file is None:
-            st.info("Silakan ambil foto atau unggah gambar daun kentang terlebih dahulu.")
-            return
-
-        is_valid, result = validate_image(image_file)
-        if not is_valid:
+    if image_file is not None:
+        valid, result = validate_image(image_file)
+        if valid:
+            image = result
+            st.image(image, caption="Gambar yang akan dianalisis", use_container_width=True)
+        else:
             st.error(result)
-            return
 
-        image = result
-        st.image(image, caption="Gambar Daun Kentang", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        with st.spinner("Menganalisis gambar..."):
-            try:
+with right_col:
+    st.subheader("🔍 Hasil Analisis")
+
+    if image is None:
+        st.info("Silakan ambil foto atau upload gambar daun kentang terlebih dahulu.")
+    else:
+        try:
+            with st.spinner("Memuat model dan memproses prediksi..."):
+                model = load_model_resource()
+                class_names = load_class_names()
                 index, confidence_score, _prediction = predict_image(model, image)
-            except Exception as error:  # noqa: BLE001
-                st.error(f"Error saat melakukan prediksi: {error}")
-                return
 
-        if index >= len(class_names):
-            st.error(
-                f"Output model menghasilkan index {index}, tetapi labels.txt hanya memiliki {len(class_names)} label. "
-                "Periksa kembali file labels.txt agar jumlah label sama dengan output model."
+            if index >= len(class_names):
+                st.error(
+                    f"Index prediksi `{index}` melebihi jumlah label `{len(class_names)}`. Periksa file labels.txt."
+                )
+            else:
+                label = class_names[index]
+                render_prediction(label, confidence_score)
+                st.plotly_chart(create_gauge_chart(confidence_score), use_container_width=True)
+
+        except Exception as error:
+            st.error("Aplikasi gagal memuat model atau melakukan prediksi.")
+            st.code(str(error))
+            st.info(
+                "Pastikan `keras_model.h5` berada di folder yang sama dengan `main.py` dan dependency berhasil ter-install."
             )
-            return
 
-        label = class_names[index]
-        confidence_percent = confidence_score * 100
-        render_prediction(label, confidence_score)
-        display_confidence(confidence_percent)
-        st.plotly_chart(create_gauge_chart(confidence_percent), use_container_width=True)
-
-    st.markdown("---")
-    st.markdown(
-        f"""
-        <div class="footer">
-            © {CURRENT_YEAR} Developed by:
-            <a href="https://www.linkedin.com/in/galuh-adi-insani-1aa0a5105/" target="_blank">Galuh Adi Insani</a>
-            with ❤️<br>All rights reserved.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.markdown(
+    f"<div class='footer'>© {CURRENT_YEAR} Deteksi Penyakit Daun Kentang | Fixed compatibility package</div>",
+    unsafe_allow_html=True,
+)
