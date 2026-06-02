@@ -2,7 +2,7 @@
 # Do NOT change this back to tensorflow==2.15.1 on Streamlit Cloud.
 streamlit>=1.36,<2
 tensorflow==2.21.0
-numpy>=1.26,<3
-pillow>=10,<13
-h5py>=3.12,<4
-plotly>=5.24,<7
+numpy
+pillow
+h5py
+plotly
