@@ -1,12 +1,9 @@
-streamlit-webrtc
-opencv-python-headless
-SciPy
-NumPy
-tensorflow
-streamlit
-streamlit-extras
-pillow
-datetime
-keras
-h5py
-streamlit-lottie
+# Use Python 3.10 or 3.11. Do not use Python 3.12 for this package.
+# TensorFlow 2.15.x is pinned because keras_model.h5 is a legacy Keras/HDF5 model.
+streamlit==1.36.0
+tensorflow==2.15.1
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+pillow==10.4.0
+h5py==3.10.0
+plotly==5.24.1

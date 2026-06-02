@@ -1,52 +1,99 @@
-# Software Pendeteksi Penyakit Daun Kentang
+# Software Pendeteksi Penyakit Daun Kentang - Fixed Full Package
 
-## Deskripsi
-Proyek ini menggunakan machine learning dan computer vision untuk mendeteksi penyakit pada daun kentang. Saat ini, sistem dapat mendeteksi kondisi berikut:
-- Healthy (Daun Kentang Sehat)
-- Early Blight (Busuk Daun Awal)
-- Late Blight (Busuk Daun Akhir)
+Paket ini adalah versi yang sudah disesuaikan agar aplikasi dapat berjalan kembali saat membuka model Keras lama `keras_model.h5`.
 
-Sistem memberikan prediksi dengan tingkat kepercayaan (confidence score) untuk membantu diagnosis awal.
+## Status paket
 
-## Teknologi
-- Database gambar dari Kaggle (Potato Leaf Disease Dataset)
-- Model machine learning dibangun menggunakan TensorFlow/Keras
-- Aplikasi web interaktif menggunakan Streamlit
-- Algoritma computer vision untuk preprocessing gambar
+File `keras_model.h5` sudah disertakan di dalam ZIP ini, jadi Anda tidak perlu mengunduh model secara manual.
 
-## Cara Penggunaan
-1. Clone repository ini ke komputer Anda
-2. Pastikan semua dependensi terinstal
-3. Jalankan aplikasi web sesuai instruksi di bagian Instalasi
-4. Ambil foto daun kentang menggunakan kamera atau unggah gambar dari perangkat
-5. Sistem akan menganalisis dan menampilkan hasil prediksi penyakit
+## Masalah yang diperbaiki
 
-## Instalasi
+Error utama:
+
+```text
+Layer "functional_4" expects 1 input(s), but it received 2 input tensors
+```
+
+Perbaikan utama:
+
+- Menghapus penggunaan standalone `keras` dan memakai `tensorflow.keras`.
+- Mengunci TensorFlow ke versi `2.15.1` agar lebih kompatibel dengan model HDF5/Keras lama.
+- Menambahkan loader model fallback yang dapat membuat salinan `keras_model.compat.h5` tanpa mengubah model asli.
+- Menambahkan parser `labels.txt` yang mendukung format satu baris dan multi-baris.
+- Menyertakan `keras_model.h5` langsung di paket final.
+
+## Isi paket
+
+```text
+main.py                  # Aplikasi Streamlit fixed
+localRun.py              # Runner webcam lokal fixed
+keras_model.h5           # Model Keras asli yang sudah disertakan
+labels.txt               # Label model
+download_model.py        # Opsional: downloader ulang model dari repo asli
+requirements.txt         # Dependency yang sudah dipin
+runtime.txt              # Runtime Python 3.11 untuk Streamlit Cloud
+.streamlit/config.toml   # Konfigurasi Streamlit
+start_windows.bat        # Shortcut jalan di Windows
+start_linux_mac.sh       # Shortcut jalan di Linux/macOS
+test.py                  # Tes kamera sederhana
+MODEL_FILE_NOTE.txt      # Catatan model
+```
+
+## Cara menjalankan lokal
+
+Disarankan memakai Python 3.10 atau 3.11. Jangan gunakan Python 3.12 untuk paket ini.
+
 ```bash
-# Clone repository
-git clone https://github.com/username/deteksikentang.git
-cd deteksikentang
+python -m venv .venv
+```
 
-# Instal dependensi
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install dependency:
+
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
 
-# Jalankan aplikasi
+Jalankan aplikasi:
+
+```bash
 streamlit run main.py
 ```
 
-## Fitur Utama
-- Deteksi real-time menggunakan kamera
-- Opsi untuk mengunggah gambar
-- Visualisasi skor kepercayaan dengan gauge chart
-- Interface yang intuitif dan mobile-friendly
-- Informasi detail tentang setiap jenis penyakit
+## Cara cepat Windows
 
-## Kontribusi
-Kontribusi untuk pengembangan proyek ini sangat diterima. Silakan buat pull request atau laporkan issues.
+Double click:
 
-## Lisensi
-Sertakan nama asli jika mau memperbaiki kode ini
+```text
+start_windows.bat
+```
 
----
+## Cara cepat Linux/macOS
 
-Dibuat oleh: Galuh Adi Insani
+```bash
+chmod +x start_linux_mac.sh
+./start_linux_mac.sh
+```
+
+## Catatan penting
+
+- Jangan install package `keras` secara terpisah.
+- Jangan pakai Python 3.12 untuk paket ini.
+- File `keras_model.compat.h5` akan dibuat otomatis jika loader perlu fallback kompatibilitas.
+- Jika deploy ke Streamlit Cloud, pastikan semua file di paket ini ikut di-push ke repository, termasuk `keras_model.h5`.
+
+## Kredit
+
+Developed by: Galuh Adi Insani.
